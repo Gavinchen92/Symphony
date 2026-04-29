@@ -526,9 +526,10 @@ export function App() {
       return;
     }
 
-    if (event.key === "Enter" && pathMention.suggestions[pathMention.selectedIndex]) {
+    const selectedSuggestion = pathMention.suggestions[pathMention.selectedIndex];
+    if (event.key === "Enter" && selectedSuggestion) {
       event.preventDefault();
-      insertPathSuggestion(pathMention.suggestions[pathMention.selectedIndex]);
+      insertPathSuggestion(selectedSuggestion);
     }
   }
 
