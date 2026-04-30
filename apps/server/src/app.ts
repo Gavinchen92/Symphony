@@ -23,6 +23,7 @@ import type { EventBus } from "./events";
 import type { TaskFinalizer } from "./finalizer";
 import type { Orchestrator } from "./orchestrator";
 import { listRepositoryPathSuggestions, selectRepositoryDirectory } from "./repositoryDiscovery";
+import type { SystemMonitor } from "./systemMonitor";
 
 type AppDeps = {
   db: SymphonyDb;
@@ -32,6 +33,7 @@ type AppDeps = {
   webDistDir: string;
   logger: FastifyBaseLogger;
   closeLogger?: () => void;
+  systemMonitor?: Pick<SystemMonitor, "report" | "stop">;
 };
 
 declare module "fastify" {
@@ -71,6 +73,7 @@ export async function createFastifyApp(deps: AppDeps): Promise<FastifyInstance> 
   app.decorate("symphonyEventBus", deps.eventBus);
 
   app.addHook("onClose", () => {
+    deps.systemMonitor?.stop();
     deps.db.close();
     deps.closeLogger?.();
   });
@@ -112,6 +115,16 @@ export async function createFastifyApp(deps: AppDeps): Promise<FastifyInstance> 
     }
 
     request.log.error({ err: error, requestId: request.id }, "request_failed");
+    deps.systemMonitor?.report({
+      source: "fastify",
+      error,
+      context: {
+        requestId: request.id,
+        method: request.method,
+        url: request.url,
+        statusCode: 500
+      }
+    });
     void reply.code(500).send({ error: "服务内部错误" });
   });
 

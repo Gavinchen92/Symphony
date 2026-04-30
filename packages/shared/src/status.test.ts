@@ -3,6 +3,7 @@ import {
   CreateRepositoryInputSchema,
   CreateTaskInputSchema,
   RepositoryPathSuggestionSchema,
+  SettingsSchema,
   UpdateRepositoryInputSchema,
   WorkspaceStrategySchema,
   assertTaskTransition,
@@ -68,6 +69,18 @@ describe("repository and workspace schemas", () => {
       path: "apps/web/src/App.tsx",
       kind: "file",
       matches: [0, 5, 13]
+    });
+  });
+
+  it("applies self monitor defaults to settings", () => {
+    expect(
+      SettingsSchema.parse({
+        workspaceRoot: "/tmp/symphony",
+        maxConcurrentAgents: 2
+      }).selfMonitor
+    ).toEqual({
+      enabled: true,
+      cooldownMinutes: 30
     });
   });
 });

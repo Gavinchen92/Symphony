@@ -16,7 +16,8 @@ describe("Orchestrator", () => {
     const db = new SymphonyDb(join(root, "db.sqlite"), eventBus, root);
     db.saveSettings({
       workspaceRoot: join(root, ".workspaces"),
-      maxConcurrentAgents: 1
+      maxConcurrentAgents: 1,
+      selfMonitor: { enabled: true, cooldownMinutes: 30 }
     });
     const repository = db.createRepository({
       name: "Test Repo",
@@ -65,7 +66,11 @@ describe("Orchestrator", () => {
     const root = mkdtempSync(join(tmpdir(), "symphony-auto-orchestrator-"));
     const eventBus = new EventBus();
     const db = new SymphonyDb(join(root, "db.sqlite"), eventBus, root);
-    db.saveSettings({ workspaceRoot: join(root, ".workspaces"), maxConcurrentAgents: 1 });
+    db.saveSettings({
+      workspaceRoot: join(root, ".workspaces"),
+      maxConcurrentAgents: 1,
+      selfMonitor: { enabled: true, cooldownMinutes: 30 }
+    });
     const repository = db.createRepository({
       name: "Auto Repo",
       path: root,

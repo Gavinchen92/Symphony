@@ -10,12 +10,19 @@ import { GitWorktreeProvider } from "./workspace";
 import { createAiAdvisor } from "./aiAdvisor";
 import { TaskFinalizer } from "./finalizer";
 import { createServiceLogger } from "./logger";
+import { SystemMonitor } from "./systemMonitor";
 
 const config = loadRuntimeConfig();
 const serviceLogger = createServiceLogger(config.log);
 const eventBus = new EventBus();
 const db = new SymphonyDb(resolve(config.dataDir, "symphony.sqlite"), eventBus, config.projectRoot);
 const advisor = createAiAdvisor(config.llm);
+const systemMonitor = new SystemMonitor({
+  db,
+  projectRoot: config.projectRoot,
+  logger: serviceLogger.logger
+});
+systemMonitor.startProcessListeners();
 
 eventBus.onRunEvent((event) => {
   const run = db.getRun(event.runId);
@@ -36,9 +43,10 @@ const orchestrator = new Orchestrator({
   db,
   workspaceProvider: new GitWorktreeProvider(),
   autoStrategySelector: new AiAutoStrategySelector(advisor),
-  agentRunner: new CodexAppServerRunner()
+  agentRunner: new CodexAppServerRunner(),
+  systemMonitor
 });
-const finalizer = new TaskFinalizer({ db, advisor });
+const finalizer = new TaskFinalizer({ db, advisor, systemMonitor });
 
 const app = await createFastifyApp({
   db,
@@ -47,7 +55,8 @@ const app = await createFastifyApp({
   eventBus,
   webDistDir: config.webDistDir,
   logger: serviceLogger.logger,
-  closeLogger: serviceLogger.close
+  closeLogger: serviceLogger.close,
+  systemMonitor
 });
 
 await app.listen({ host: config.host, port: config.port });

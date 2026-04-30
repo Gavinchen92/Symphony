@@ -2,6 +2,7 @@ import type { Repository, ResolvedWorkspaceStrategy, Run, RunEventType, Settings
 import type { AutoStrategySelector } from "./autoStrategy";
 import type { SymphonyDb } from "./db";
 import type { AgentRunner } from "./runnerTypes";
+import type { SystemMonitor } from "./systemMonitor";
 import type { PreparedWorkspace, WorkspaceProvider } from "./workspace";
 
 type OrchestratorDeps = {
@@ -9,6 +10,7 @@ type OrchestratorDeps = {
   workspaceProvider: WorkspaceProvider;
   autoStrategySelector: AutoStrategySelector;
   agentRunner: AgentRunner;
+  systemMonitor?: Pick<SystemMonitor, "report">;
 };
 
 type ActiveRun = {
@@ -81,6 +83,7 @@ export class Orchestrator {
     const run = this.deps.db.getRun(runId);
     const task = this.deps.db.getTask(run.taskId);
     const repository = task.repositoryId ? this.deps.db.getRepository(task.repositoryId) : null;
+    let phase: "preparing" | "workspace" | "codex" = "preparing";
 
     try {
       if (!repository) {
@@ -97,6 +100,7 @@ export class Orchestrator {
       this.deps.db.updateRun(runId, {
         workspaceStrategy: strategySelection.strategy
       });
+      phase = "workspace";
       const workspace = await this.deps.workspaceProvider.prepare(
         {
           task,
@@ -119,6 +123,7 @@ export class Orchestrator {
       });
       this.event(runId, "status", "Codex 运行已开始", workspace);
 
+      phase = "codex";
       const result = await this.deps.agentRunner.run({
         cwd: workspace.path,
         prompt: buildPrompt(task, repository, workspace),
@@ -139,6 +144,18 @@ export class Orchestrator {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const wasCancelled = abortController.signal.aborted;
+      if (!wasCancelled && phase !== "codex") {
+        this.deps.systemMonitor?.report({
+          source: "orchestrator",
+          error,
+          context: {
+            phase,
+            runId,
+            taskId: task.id,
+            repositoryId: task.repositoryId
+          }
+        });
+      }
       this.deps.db.updateRun(runId, {
         status: wasCancelled ? "cancelled" : "failed",
         error: message,

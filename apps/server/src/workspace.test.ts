@@ -63,7 +63,8 @@ describe("SparseWorktreeProvider", () => {
     };
     const settings: Settings = {
       workspaceRoot,
-      maxConcurrentAgents: 1
+      maxConcurrentAgents: 1,
+      selfMonitor: { enabled: true, cooldownMinutes: 30 }
     };
     const repository: Repository = {
       id: "00000000-0000-4000-8000-000000000001",
@@ -120,7 +121,8 @@ describe("SparseWorktreeProvider", () => {
     };
     const settings: Settings = {
       workspaceRoot,
-      maxConcurrentAgents: 1
+      maxConcurrentAgents: 1,
+      selfMonitor: { enabled: true, cooldownMinutes: 30 }
     };
     const repository: Repository = {
       id: "00000000-0000-4000-8000-000000000002",

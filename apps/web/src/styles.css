@@ -1101,6 +1101,42 @@ textarea {
   gap: 14px;
 }
 
+.toggle-field {
+  align-items: center;
+  background: rgba(14, 15, 12, 0.035);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  color: var(--ink);
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  padding: 12px 14px;
+}
+
+.toggle-field span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.toggle-field b {
+  font-size: 13px;
+}
+
+.toggle-field small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.toggle-field input {
+  accent-color: var(--dark-green);
+  flex: 0 0 auto;
+  height: 20px;
+  min-height: 20px;
+  width: 20px;
+}
+
 @media (max-width: 1240px) {
   .topbar {
     grid-template-columns: 1fr;

@@ -7,6 +7,7 @@ import { createFastifyApp } from "./app";
 import { SymphonyDb } from "./db";
 import { EventBus } from "./events";
 import { createServiceLogger } from "./logger";
+import { SystemMonitor } from "./systemMonitor";
 
 describe("Fastify app", () => {
   it("serves health and CORS preflight", async () => {
@@ -93,6 +94,40 @@ describe("Fastify app", () => {
     }
   });
 
+  it("turns unhandled 500 errors into self repair tasks", async () => {
+    const fixture = await createFixture();
+    try {
+      fixture.app.get("/api/test-system-failure", async () => {
+        throw new Error("database unavailable apiKey=sk-secret1234567890");
+      });
+
+      const response = await fixture.app.inject({
+        method: "GET",
+        url: "/api/test-system-failure",
+        headers: {
+          authorization: "Bearer should-not-be-captured"
+        }
+      });
+
+      expect(response.statusCode).toBe(500);
+      expect(response.json()).toEqual({ error: "服务内部错误" });
+
+      const tasks = fixture.db.listTasksWithLatestRun();
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0]).toMatchObject({
+        repositoryId: fixture.systemRepository.id,
+        title: expect.stringContaining("修复 Symphony 系统错误"),
+        priority: 4,
+        labels: ["system-monitor", "auto-created"],
+        status: "todo"
+      });
+      expect(tasks[0]?.description).not.toContain("sk-secret1234567890");
+      expect(tasks[0]?.description).not.toContain("should-not-be-captured");
+    } finally {
+      await fixture.app.close();
+    }
+  });
+
   it("streams replayed and live run events", async () => {
     const fixture = await createFixture();
     try {
@@ -170,6 +205,13 @@ async function createFixture(input: { withWebDist?: boolean } = {}) {
     dir: join(root, "logs"),
     stdout: false
   });
+  const systemMonitor = new SystemMonitor({ db, projectRoot: root, logger: logger.logger });
+  const systemRepository = db.ensureRepository({
+    name: "Symphony",
+    path: root,
+    baseBranch: "main",
+    workspaceStrategy: "full"
+  });
   const app = await createFastifyApp({
     db,
     eventBus,
@@ -188,10 +230,11 @@ async function createFixture(input: { withWebDist?: boolean } = {}) {
       finalize(taskId) {
         return db.updateTaskStatus(taskId, "finalizing");
       }
-    }
+    },
+    systemMonitor
   });
 
-  return { app, db, eventBus, root, webDistDir };
+  return { app, db, eventBus, root, webDistDir, systemMonitor, systemRepository };
 }
 
 function serverUrl(app: Awaited<ReturnType<typeof createFastifyApp>>): string {
