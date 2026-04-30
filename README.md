@@ -11,7 +11,7 @@ Symphony Local Runner 是一个本地 coding-agent 工作队列。它参考 Open
 
 ## 架构与运行边界
 
-系统架构、模块职责和日志边界记录在 [docs/architecture.md](docs/architecture.md)。这里是项目入口，具体的执行边界以架构文档和 `AGENTS.md` 为准。
+系统架构、模块职责和日志边界见 [docs/architecture.md](docs/architecture.md)。
 
 ## 常用命令
 
