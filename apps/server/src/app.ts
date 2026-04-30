@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import cors from "@fastify/cors";
 import fastifyStatic from "@fastify/static";
@@ -97,17 +97,8 @@ export async function createFastifyApp(deps: AppDeps): Promise<FastifyInstance> 
     done();
   });
 
-  await app.register(cors, {
-    origin: corsOrigin,
-    methods: [...corsMethods],
-    allowedHeaders: ["content-type"]
-  });
-
-  registerApiRoutes(app);
-  await registerStaticRoutes(app, deps.webDistDir);
-
   app.setErrorHandler((error, request, reply) => {
-    if (error instanceof ZodError) {
+    if (isZodError(error)) {
       request.log.warn({ err: error, requestId: request.id }, "request_validation_failed");
       void reply.code(400).send({ error: "请求参数不合法" });
       return;
@@ -133,6 +124,15 @@ export async function createFastifyApp(deps: AppDeps): Promise<FastifyInstance> 
     sendSpaFallback(reply, deps.webDistDir);
   });
 
+  await app.register(cors, {
+    origin: corsOrigin,
+    methods: [...corsMethods],
+    allowedHeaders: ["content-type"]
+  });
+
+  registerApiRoutes(app);
+  await registerStaticRoutes(app, deps.webDistDir);
+
   return app;
 }
 
@@ -142,6 +142,13 @@ function statusCodeOf(error: unknown): number | null {
   }
   const statusCode = (error as { statusCode?: unknown }).statusCode;
   return typeof statusCode === "number" ? statusCode : null;
+}
+
+function isZodError(error: unknown): error is ZodError {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+  return error instanceof ZodError || ("issues" in error && Array.isArray(error.issues));
 }
 
 function registerApiRoutes(app: FastifyInstance): void {
@@ -243,10 +250,7 @@ function registerApiRoutes(app: FastifyInstance): void {
 }
 
 async function registerStaticRoutes(app: FastifyInstance, webDistDir: string): Promise<void> {
-  if (!existsSync(webDistDir)) {
-    return;
-  }
-
+  mkdirSync(webDistDir, { recursive: true });
   await app.register(fastifyStatic, {
     root: webDistDir,
     wildcard: true

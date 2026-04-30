@@ -82,7 +82,7 @@ describe("Fastify app", () => {
         url: "/api/repositories",
         payload: {}
       });
-      expect(invalidInput.statusCode).toBe(400);
+      expect(invalidInput.statusCode, invalidInput.body).toBe(400);
       expect(invalidInput.json()).toEqual({ error: "请求参数不合法" });
 
       const missingApi = await fixture.app.inject({ method: "GET", url: "/api/missing" });
@@ -139,6 +139,20 @@ describe("Fastify app", () => {
       await fixture.app.close();
     }
   });
+
+  it("keeps sendFile fallback available when web dist appears after startup", async () => {
+    const fixture = await createFixture();
+    try {
+      writeFileSync(join(fixture.webDistDir, "index.html"), "<!doctype html><title>Late Web</title>");
+
+      const fallback = await fixture.app.inject({ method: "GET", url: "/late-route" });
+      expect(fallback.statusCode).toBe(200);
+      expect(fallback.headers["content-type"]).toContain("text/html");
+      expect(fallback.body).toContain("Late Web");
+    } finally {
+      await fixture.app.close();
+    }
+  });
 });
 
 async function createFixture(input: { withWebDist?: boolean } = {}) {
@@ -177,7 +191,7 @@ async function createFixture(input: { withWebDist?: boolean } = {}) {
     }
   });
 
-  return { app, db, eventBus, root };
+  return { app, db, eventBus, root, webDistDir };
 }
 
 function serverUrl(app: Awaited<ReturnType<typeof createFastifyApp>>): string {
