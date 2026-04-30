@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { describe, expect, it } from "vitest";
 import { createFastifyApp } from "./app";
+import type { AiAdvisor } from "./aiAdvisor";
 import { SymphonyDb } from "./db";
 import { EventBus } from "./events";
 import { createServiceLogger } from "./logger";
@@ -70,6 +71,56 @@ describe("Fastify app", () => {
       const list = await fixture.app.inject({ method: "GET", url: "/api/tasks" });
       expect(list.statusCode).toBe(200);
       expect(list.json()).toHaveLength(1);
+    } finally {
+      await fixture.app.close();
+    }
+  });
+
+  it("creates tasks without a user supplied title and returns the generated title", async () => {
+    const fixture = await createFixture({
+      taskTitleGenerator: {
+        async generateTaskTitle({ task }) {
+          expect(task.title).toContain("修复 Symphony 系统错误");
+          return "修复 Symphony 系统错误";
+        }
+      }
+    });
+    try {
+      const repository = await fixture.app.inject({
+        method: "POST",
+        url: "/api/repositories",
+        payload: {
+          name: "Repo",
+          path: fixture.root,
+          baseBranch: "main",
+          workspaceStrategy: "full"
+        }
+      });
+      const repositoryBody = repository.json() as { id: string };
+
+      const task = await fixture.app.inject({
+        method: "POST",
+        url: "/api/tasks",
+        payload: {
+          repositoryId: repositoryBody.id,
+          description: "修复 Symphony 系统错误任务创建链路",
+          priority: 2,
+          labels: [],
+          scopePaths: []
+        }
+      });
+
+      expect(task.statusCode, task.body).toBe(201);
+      expect(task.json()).toMatchObject({
+        repositoryId: repositoryBody.id,
+        title: "修复 Symphony 系统错误",
+        status: "todo",
+        repository: {
+          id: repositoryBody.id,
+          name: "Repo"
+        },
+        latestRun: null
+      });
     } finally {
       await fixture.app.close();
     }
@@ -190,7 +241,12 @@ describe("Fastify app", () => {
   });
 });
 
-async function createFixture(input: { withWebDist?: boolean } = {}) {
+async function createFixture(
+  input: {
+    withWebDist?: boolean;
+    taskTitleGenerator?: Pick<AiAdvisor, "generateTaskTitle">;
+  } = {}
+) {
   const root = mkdtempSync(join(tmpdir(), "symphony-fastify-"));
   const webDistDir = join(root, "web-dist");
   if (input.withWebDist) {
@@ -218,6 +274,7 @@ async function createFixture(input: { withWebDist?: boolean } = {}) {
     webDistDir,
     logger: logger.logger,
     closeLogger: logger.close,
+    ...(input.taskTitleGenerator ? { taskTitleGenerator: input.taskTitleGenerator } : {}),
     orchestrator: {
       dispatch(taskId) {
         return db.createRun(taskId);

@@ -18,6 +18,7 @@ import {
   UpdateTaskInputSchema
 } from "@symphony/shared";
 import { ZodError, z } from "zod";
+import type { AiAdvisor } from "./aiAdvisor";
 import type { SymphonyDb } from "./db";
 import type { EventBus } from "./events";
 import type { TaskFinalizer } from "./finalizer";
@@ -29,6 +30,7 @@ type AppDeps = {
   db: SymphonyDb;
   orchestrator: Pick<Orchestrator, "dispatch" | "cancelTask">;
   finalizer: Pick<TaskFinalizer, "finalize">;
+  taskTitleGenerator?: Pick<AiAdvisor, "generateTaskTitle">;
   eventBus: EventBus;
   webDistDir: string;
   logger: FastifyBaseLogger;
@@ -41,9 +43,16 @@ declare module "fastify" {
     symphonyDb: SymphonyDb;
     symphonyOrchestrator: Pick<Orchestrator, "dispatch" | "cancelTask">;
     symphonyFinalizer: Pick<TaskFinalizer, "finalize">;
+    symphonyTaskTitleGenerator: Pick<AiAdvisor, "generateTaskTitle">;
     symphonyEventBus: EventBus;
   }
 }
+
+const disabledTaskTitleGenerator: Pick<AiAdvisor, "generateTaskTitle"> = {
+  async generateTaskTitle() {
+    return null;
+  }
+};
 
 const corsOrigin = "http://127.0.0.1:5173";
 const corsMethods = ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"] as const;
@@ -70,6 +79,7 @@ export async function createFastifyApp(deps: AppDeps): Promise<FastifyInstance> 
   app.decorate("symphonyDb", deps.db);
   app.decorate("symphonyOrchestrator", deps.orchestrator);
   app.decorate("symphonyFinalizer", deps.finalizer);
+  app.decorate("symphonyTaskTitleGenerator", deps.taskTitleGenerator ?? disabledTaskTitleGenerator);
   app.decorate("symphonyEventBus", deps.eventBus);
 
   app.addHook("onClose", () => {
@@ -208,7 +218,23 @@ function registerApiRoutes(app: FastifyInstance): void {
   app.post("/api/tasks", async (request, reply) => {
     const input = CreateTaskInputSchema.parse(request.body);
     void reply.code(201);
-    return app.symphonyDb.createTask(input);
+    const created = app.symphonyDb.createTask(input);
+    if (!input.title) {
+      const repository = app.symphonyDb.getRepository(input.repositoryId);
+      const generatedTitle = await app.symphonyTaskTitleGenerator
+        .generateTaskTitle({
+          task: created,
+          repository
+        })
+        .catch((error: unknown) => {
+          request.log.warn({ err: error, taskId: created.id }, "task_title_generation_failed");
+          return null;
+        });
+      if (generatedTitle) {
+        app.symphonyDb.updateTask(created.id, { title: generatedTitle });
+      }
+    }
+    return app.symphonyDb.getTaskWithLatestRun(created.id);
   });
 
   app.get("/api/tasks/:taskId", async (request) => {

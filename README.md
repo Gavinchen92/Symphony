@@ -5,6 +5,7 @@ Symphony Local Runner 是一个本地 coding-agent 工作队列。它参考 Open
 ## V1 能力
 
 - 本地 Web 队列：创建任务、调整状态、派发运行、查看日志。
+- 任务标题自动生成：新建任务只填写任务内容，服务端 AI 根据内容生成标题。
 - 单仓库配置：绑定一个目标 monorepo。
 - `sparse-worktree` workspace：每个任务一个独立 git worktree，并启用 sparse-checkout。
 - Codex app-server adapter：每次 run 启动一个 Codex app-server 会话，事件写入 DB 并流式推给前端。

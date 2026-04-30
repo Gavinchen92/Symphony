@@ -49,6 +49,9 @@ describe("TaskFinalizer", () => {
       throw new Error(`unexpected command: ${command}`);
     };
     const advisor: AiAdvisor = {
+      async generateTaskTitle() {
+        return null;
+      },
       async selectWorkspaceStrategy() {
         return null;
       },
@@ -131,6 +134,9 @@ describe("TaskFinalizer", () => {
 });
 
 const nullAdvisor: AiAdvisor = {
+  async generateTaskTitle() {
+    return null;
+  },
   async selectWorkspaceStrategy() {
     return null;
   },

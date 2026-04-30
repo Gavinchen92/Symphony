@@ -52,6 +52,7 @@ const app = await createFastifyApp({
   db,
   orchestrator,
   finalizer,
+  taskTitleGenerator: advisor,
   eventBus,
   webDistDir: config.webDistDir,
   logger: serviceLogger.logger,

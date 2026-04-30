@@ -109,7 +109,7 @@ export const TaskSchema = z.object({
 
 export const CreateTaskInputSchema = z.object({
   repositoryId: z.string().uuid(),
-  title: z.string().trim().min(1),
+  title: z.string().trim().min(1).optional(),
   description: z.string().default(""),
   priority: z.number().int().min(0).max(5).default(2),
   labels: z.array(z.string().trim().min(1)).default([]),

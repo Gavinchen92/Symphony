@@ -266,6 +266,7 @@ export class SymphonyDb {
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
     const key = `SYM-${Date.now().toString(36).toUpperCase()}`;
+    const title = input.title ?? buildInitialTaskTitle(input.description);
     this.db
       .prepare(
         `INSERT INTO tasks
@@ -276,7 +277,7 @@ export class SymphonyDb {
         id,
         key,
         input.repositoryId,
-        input.title,
+        title,
         input.description,
         input.priority,
         JSON.stringify(input.labels),
@@ -285,6 +286,15 @@ export class SymphonyDb {
         now
       );
     return this.getTask(id);
+  }
+
+  getTaskWithLatestRun(id: string): TaskWithLatestRun {
+    const task = this.getTask(id);
+    return {
+      ...task,
+      repository: task.repositoryId ? this.getRepository(task.repositoryId) : null,
+      latestRun: this.getLatestRun(id)
+    };
   }
 
   listTasksWithLatestRun(): TaskWithLatestRun[] {
@@ -733,6 +743,17 @@ function mapSystemErrorIncident(row: SystemErrorIncidentRow): SystemErrorInciden
     lastSeen: row.last_seen,
     lastSummary: row.last_summary
   };
+}
+
+function buildInitialTaskTitle(description: string): string {
+  const normalized = description
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean);
+  if (!normalized) {
+    return "新任务";
+  }
+  return normalized.length > 36 ? `${normalized.slice(0, 36)}...` : normalized;
 }
 
 function isCooldownElapsed(lastSeen: string, now: string, cooldownMinutes: number): boolean {

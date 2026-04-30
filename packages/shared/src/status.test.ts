@@ -49,6 +49,22 @@ describe("repository and workspace schemas", () => {
     expect(() => CreateTaskInputSchema.parse({ title: "Missing repo" })).toThrow();
   });
 
+  it("allows task creation without a user supplied title", () => {
+    const parsed = CreateTaskInputSchema.parse({
+      repositoryId: "00000000-0000-4000-8000-000000000001",
+      description: "让 AI 根据任务内容生成标题"
+    });
+
+    expect(parsed).toMatchObject({
+      repositoryId: "00000000-0000-4000-8000-000000000001",
+      description: "让 AI 根据任务内容生成标题",
+      priority: 2,
+      labels: [],
+      scopePaths: []
+    });
+    expect(parsed.title).toBeUndefined();
+  });
+
   it("accepts all workspace strategies", () => {
     expect(WorkspaceStrategySchema.options).toEqual(["auto", "sparse-worktree", "full"]);
   });

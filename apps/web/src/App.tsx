@@ -108,7 +108,6 @@ const defaultSettings: Settings = {
 
 type TaskForm = {
   repositoryId: string;
-  title: string;
   description: string;
   priority: number;
   labels: string;
@@ -196,7 +195,6 @@ export function App() {
   const [settings, setSettings] = useState<Settings>(defaultSettings);
   const [form, setForm] = useState<TaskForm>({
     repositoryId: "",
-    title: "",
     description: "",
     priority: 2,
     labels: "",
@@ -404,7 +402,6 @@ export function App() {
       setError(null);
       const created = await createTask({
         repositoryId: form.repositoryId,
-        title: form.title,
         description: form.description,
         priority: form.priority,
         labels: parseListText(form.labels),
@@ -412,7 +409,6 @@ export function App() {
       });
       setForm({
         repositoryId: form.repositoryId,
-        title: "",
         description: "",
         priority: 2,
         labels: "",
@@ -830,7 +826,7 @@ export function App() {
             <div className="modal-header">
               <div>
                 <h2 id="task-modal-title">新建任务</h2>
-                <p>创建后进入待处理队列，由你手动派发。</p>
+                <p>只填写任务内容，创建后由 AI 自动生成标题。</p>
               </div>
               <button className="icon-button" type="button" onClick={() => setActiveModal(null)} title="关闭">
                 <X size={18} />
@@ -849,12 +845,8 @@ export function App() {
                   ))}
                 </select>
               </label>
-              <label className="field full">
-                标题 *
-                <input placeholder="例如：修复登录页 loading 状态" value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} />
-              </label>
               <label className="field full path-mention-field">
-                描述 *
+                任务内容 *
                 <textarea
                   ref={descriptionRef}
                   placeholder="写清楚目标、约束和验收方式，输入 @ 选择仓库路径"
@@ -923,7 +915,7 @@ export function App() {
                 <button className="pill-button" type="button" onClick={() => setActiveModal(null)}>
                   取消
                 </button>
-                <button className="primary-button" type="button" onClick={() => void submitTask()} disabled={!form.title.trim() || !form.repositoryId}>
+                <button className="primary-button" type="button" onClick={() => void submitTask()} disabled={!form.description.trim() || !form.repositoryId}>
                   <Plus size={17} />
                   创建任务
                 </button>

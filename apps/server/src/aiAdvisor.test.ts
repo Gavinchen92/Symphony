@@ -23,7 +23,33 @@ describe("AiAdvisor", () => {
       enabled: false
     });
 
+    await expect(advisor.generateTaskTitle({ task: taskFixture(), repository: repositoryFixture() })).resolves.toBeNull();
     await expect(advisor.selectWorkspaceStrategy({ task: taskFixture(), repository: repositoryFixture() })).resolves.toBeNull();
+  });
+
+  it("parses and normalizes generated task titles", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    title: "《修复交付流程异常。》"
+                  })
+                }
+              }
+            ]
+          }),
+          { status: 200 }
+        )
+      )
+    );
+
+    const advisor = new OpenAiCompatibleAdvisor(enabledConfig);
+    await expect(advisor.generateTaskTitle({ task: taskFixture(), repository: repositoryFixture() })).resolves.toBe("修复交付流程异常");
   });
 
   it("parses structured workspace strategy advice", async () => {

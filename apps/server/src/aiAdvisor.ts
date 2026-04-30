@@ -27,6 +27,10 @@ const CompletionDraftSchema = z.object({
   prBody: z.string().trim().min(1)
 });
 
+const TaskTitleSuggestionSchema = z.object({
+  title: z.string().trim().min(1)
+});
+
 const ChatCompletionResponseSchema = z.object({
   choices: z
     .array(
@@ -42,6 +46,11 @@ const ChatCompletionResponseSchema = z.object({
 export type WorkspaceStrategyAdvice = z.infer<typeof WorkspaceStrategyAdviceSchema>;
 export type CompletionDraft = z.infer<typeof CompletionDraftSchema>;
 
+export type TaskTitleInput = {
+  task: Task;
+  repository: Repository;
+};
+
 export type CompletionDraftInput = {
   task: Task;
   repository: Repository;
@@ -51,11 +60,16 @@ export type CompletionDraftInput = {
 };
 
 export type AiAdvisor = {
+  generateTaskTitle(input: TaskTitleInput): Promise<string | null>;
   selectWorkspaceStrategy(input: { task: Task; repository: Repository }): Promise<WorkspaceStrategyAdvice | null>;
   draftCompletion(input: CompletionDraftInput): Promise<CompletionDraft | null>;
 };
 
 export class DisabledAiAdvisor implements AiAdvisor {
+  async generateTaskTitle(): Promise<string | null> {
+    return null;
+  }
+
   async selectWorkspaceStrategy(): Promise<WorkspaceStrategyAdvice | null> {
     return null;
   }
@@ -67,6 +81,41 @@ export class DisabledAiAdvisor implements AiAdvisor {
 
 export class OpenAiCompatibleAdvisor implements AiAdvisor {
   constructor(private readonly config: LlmRuntimeConfig) {}
+
+  async generateTaskTitle(input: TaskTitleInput): Promise<string | null> {
+    const content = await this.completeJson({
+      purpose: "task title",
+      prompt: [
+        "请为本地 coding-agent 任务生成一个简短中文标题，只返回 JSON。",
+        "你只能生成标题文案，不能执行命令，不能读取本地文件，不能操作 Git。",
+        "",
+        `仓库：${input.repository.name}`,
+        `任务编号：${input.task.key}`,
+        `优先级：${input.task.priority}`,
+        `标签：${input.task.labels.join(", ") || "(无)"}`,
+        `scopePaths：${input.task.scopePaths.join(", ") || "(无)"}`,
+        "任务描述：",
+        input.task.description || "(无描述)",
+        "",
+        "标题要求：",
+        "- 中文，8 到 24 个字左右",
+        "- 使用动宾短语或问题短句",
+        "- 不包含任务编号、仓库路径、引号或句号",
+        "- 不要使用“任务标题”“新建任务”等泛化占位词",
+        "",
+        "返回格式：",
+        '{"title":"中文标题"}'
+      ].join("\n")
+    });
+    if (!content) {
+      return null;
+    }
+    const parsed = TaskTitleSuggestionSchema.safeParse(content);
+    if (!parsed.success) {
+      return null;
+    }
+    return normalizeGeneratedTitle(parsed.data.title);
+  }
 
   async selectWorkspaceStrategy(input: {
     task: Task;
@@ -198,4 +247,23 @@ function parseJsonObject(content: string): unknown | null {
       return null;
     }
   }
+}
+
+function normalizeGeneratedTitle(title: string): string | null {
+  const withoutWrappingQuotes = title
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^[《「『“"']+/, "")
+    .replace(/[》」』”"']+$/, "")
+    .trim()
+    .replace(/[。.!！?？]+$/u, "")
+    .trim();
+
+  if (!withoutWrappingQuotes) {
+    return null;
+  }
+
+  return withoutWrappingQuotes.length > 36
+    ? withoutWrappingQuotes.slice(0, 36)
+    : withoutWrappingQuotes;
 }
