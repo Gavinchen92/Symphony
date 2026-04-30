@@ -193,7 +193,7 @@ const transitions: Record<TaskStatus, readonly TaskStatus[]> = {
 };
 
 export function canTransitionTask(from: TaskStatus, to: TaskStatus): boolean {
-  return from === to || transitions[from].includes(to);
+  return from === to || (transitions[from] ?? []).includes(to);
 }
 
 export function assertTaskTransition(from: TaskStatus, to: TaskStatus): void {

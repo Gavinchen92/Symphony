@@ -9,6 +9,10 @@ Symphony Local Runner 是一个本地 coding-agent 工作队列。它参考 Open
 - `sparse-worktree` workspace：每个任务一个独立 git worktree，并启用 sparse-checkout。
 - Codex app-server adapter：每次 run 启动一个 Codex app-server 会话，事件写入 DB 并流式推给前端。
 
+## 架构与运行边界
+
+系统架构、模块职责和日志边界见 [docs/architecture.md](docs/architecture.md)。
+
 ## 常用命令
 
 ```bash
@@ -26,7 +30,7 @@ pnpm build
 ## 本地数据
 
 - SQLite: `data/symphony.sqlite`
+- 服务端结构化日志: `data/logs/server.jsonl`
 - Workspaces: `.workspaces/<task-key>`
 
-这两个目录默认不会进入 Git。
-
+SQLite 里的 `run_events` 是前端可见的任务运行事件流，`server.jsonl` 是服务端调试和审计日志。`data/` 和 `.workspaces/` 默认不会进入 Git。

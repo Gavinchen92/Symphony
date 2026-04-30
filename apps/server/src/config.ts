@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { normalizeLogLevel, type LogRuntimeConfig } from "./logger";
 
 export type RuntimeConfig = {
   host: string;
@@ -7,6 +8,7 @@ export type RuntimeConfig = {
   projectRoot: string;
   dataDir: string;
   webDistDir: string;
+  log: LogRuntimeConfig;
   llm: LlmRuntimeConfig;
 };
 
@@ -29,6 +31,11 @@ export function loadRuntimeConfig(): RuntimeConfig {
     projectRoot,
     dataDir,
     webDistDir: resolve(projectRoot, "apps/web/dist"),
+    log: {
+      level: normalizeLogLevel(env.SYMPHONY_LOG_LEVEL),
+      dir: env.SYMPHONY_LOG_DIR ?? resolve(dataDir, "logs"),
+      stdout: env.NODE_ENV !== "test"
+    },
     llm: loadLlmConfig(env)
   };
 }
