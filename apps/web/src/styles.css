@@ -542,7 +542,51 @@ h1 {
   height: 40px;
   justify-content: center;
   padding: 0;
+  position: relative;
   width: 40px;
+}
+
+.detail-actions button[data-tooltip]::after {
+  background: var(--ink);
+  border-radius: 9999px;
+  color: var(--paper);
+  content: attr(data-tooltip);
+  font-size: 12px;
+  font-weight: 800;
+  left: 50%;
+  line-height: 1;
+  opacity: 0;
+  padding: 8px 10px;
+  pointer-events: none;
+  position: absolute;
+  top: calc(100% + 8px);
+  transform: translate(-50%, 4px);
+  transition: opacity 120ms ease, transform 120ms ease;
+  white-space: nowrap;
+  z-index: 50;
+}
+
+.detail-actions button[data-tooltip]::before {
+  border-bottom: 5px solid var(--ink);
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  content: "";
+  left: 50%;
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  top: calc(100% + 3px);
+  transform: translate(-50%, 4px);
+  transition: opacity 120ms ease, transform 120ms ease;
+  z-index: 50;
+}
+
+.detail-actions button[data-tooltip]:hover::after,
+.detail-actions button[data-tooltip]:hover::before,
+.detail-actions button[data-tooltip]:focus-visible::after,
+.detail-actions button[data-tooltip]:focus-visible::before {
+  opacity: 1;
+  transform: translate(-50%, 0);
 }
 
 label,

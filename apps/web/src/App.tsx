@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   ChevronDown,
   CircleStop,
+  CircleX,
   Clock3,
   File,
   Folder,
@@ -700,13 +701,13 @@ export function App() {
                   <p>{selectedTask.key}</p>
                 </div>
                 <div className="detail-actions">
-                  <button title="派发" type="button" onClick={() => void runAction(() => dispatchTask(selectedTask.id))}>
+                  <button aria-label="派发任务" data-tooltip="派发任务" type="button" onClick={() => void runAction(() => dispatchTask(selectedTask.id))}>
                     <Play size={16} />
                   </button>
-                  <button title="取消" type="button" onClick={() => void runAction(() => cancelTask(selectedTask.id))}>
-                    <CircleStop size={16} />
+                  <button aria-label="取消任务" data-tooltip="取消任务" type="button" onClick={() => void runAction(() => cancelTask(selectedTask.id))}>
+                    <CircleX size={16} />
                   </button>
-                  <button title="完成" type="button" onClick={() => void runAction(() => markTaskDone(selectedTask.id))}>
+                  <button aria-label="确认完成" data-tooltip="确认完成" type="button" onClick={() => void runAction(() => markTaskDone(selectedTask.id))}>
                     <Check size={16} />
                   </button>
                 </div>
