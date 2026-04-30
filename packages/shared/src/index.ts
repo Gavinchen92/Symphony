@@ -150,9 +150,18 @@ export const RunEventSchema = z.object({
   createdAt: z.string()
 });
 
+export const SelfMonitorSettingsSchema = z.object({
+  enabled: z.boolean().default(true),
+  cooldownMinutes: z.number().int().min(1).max(1440).default(30)
+});
+
 export const SettingsSchema = z.object({
   workspaceRoot: z.string().min(1),
-  maxConcurrentAgents: z.number().int().min(1).max(8).default(2)
+  maxConcurrentAgents: z.number().int().min(1).max(8).default(2),
+  selfMonitor: SelfMonitorSettingsSchema.default({
+    enabled: true,
+    cooldownMinutes: 30
+  })
 });
 
 export const TaskDetailSchema = z.object({
@@ -176,6 +185,7 @@ export type CreateTaskInput = z.infer<typeof CreateTaskInputSchema>;
 export type UpdateTaskInput = z.infer<typeof UpdateTaskInputSchema>;
 export type Run = z.infer<typeof RunSchema>;
 export type RunEvent = z.infer<typeof RunEventSchema>;
+export type SelfMonitorSettings = z.infer<typeof SelfMonitorSettingsSchema>;
 export type Settings = z.infer<typeof SettingsSchema>;
 export type TaskDetail = z.infer<typeof TaskDetailSchema>;
 export type TaskWithLatestRun = z.infer<typeof TaskWithLatestRunSchema>;

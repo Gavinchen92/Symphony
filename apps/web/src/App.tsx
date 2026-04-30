@@ -99,7 +99,11 @@ const workspaceStrategyLabels: Record<WorkspaceStrategy, string> = {
 
 const defaultSettings: Settings = {
   workspaceRoot: "",
-  maxConcurrentAgents: 2
+  maxConcurrentAgents: 2,
+  selfMonitor: {
+    enabled: true,
+    cooldownMinutes: 30
+  }
 };
 
 type TaskForm = {
@@ -1007,6 +1011,43 @@ export function App() {
                   max={8}
                   value={settings.maxConcurrentAgents}
                   onChange={(event) => setSettings({ ...settings, maxConcurrentAgents: Number(event.target.value) })}
+                />
+              </label>
+              <label className="toggle-field">
+                <span>
+                  <b>启用系统错误自监控</b>
+                  <small>发现 Symphony 自身 500 或进程级错误时自动创建修复任务。</small>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={settings.selfMonitor.enabled}
+                  onChange={(event) =>
+                    setSettings({
+                      ...settings,
+                      selfMonitor: {
+                        ...settings.selfMonitor,
+                        enabled: event.target.checked
+                      }
+                    })
+                  }
+                />
+              </label>
+              <label className="field">
+                重复错误冷却时间（分钟）
+                <input
+                  type="number"
+                  min={1}
+                  max={1440}
+                  value={settings.selfMonitor.cooldownMinutes}
+                  onChange={(event) =>
+                    setSettings({
+                      ...settings,
+                      selfMonitor: {
+                        ...settings.selfMonitor,
+                        cooldownMinutes: Number(event.target.value)
+                      }
+                    })
+                  }
                 />
               </label>
             </div>

@@ -1,8 +1,11 @@
 import { mkdirSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
 import {
   assertTaskTransition,
+  SettingsSchema,
+  terminalTaskStatuses,
   type CreateRepositoryInput,
   type CreateTaskInput,
   type Repository,
@@ -20,6 +23,8 @@ import {
   type UpdateTaskInput
 } from "@symphony/shared";
 import type { EventBus } from "./events";
+
+const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as typeof import("node:sqlite");
 
 type RepositoryRow = {
   id: string;
@@ -74,7 +79,18 @@ type RunEventRow = {
   created_at: string;
 };
 
+type SystemErrorIncidentRow = {
+  fingerprint: string;
+  task_id: string | null;
+  source: string;
+  occurrences: number;
+  first_seen: string;
+  last_seen: string;
+  last_summary: string;
+};
+
 const settingsKey = "settings";
+const terminalTaskStatusSet = new Set<TaskStatus>(terminalTaskStatuses);
 
 type TaskCompletionPatch = Partial<
   Pick<
@@ -87,8 +103,42 @@ type TaskCompletionPatch = Partial<
   >
 >;
 
+export type EnsureRepositoryInput = {
+  name: string;
+  path: string;
+  baseBranch: string;
+  workspaceStrategy: Repository["workspaceStrategy"];
+};
+
+export type CreateSystemErrorIncidentInput = {
+  fingerprint: string;
+  source: string;
+  title: string;
+  description: string;
+  summary: string;
+  repository: EnsureRepositoryInput;
+  cooldownMinutes: number;
+  now?: Date;
+};
+
+export type SystemErrorIncident = {
+  fingerprint: string;
+  taskId: string | null;
+  source: string;
+  occurrences: number;
+  firstSeen: string;
+  lastSeen: string;
+  lastSummary: string;
+};
+
+export type SystemErrorRecordResult = {
+  incident: SystemErrorIncident;
+  task: Task | null;
+  createdTask: boolean;
+};
+
 export class SymphonyDb {
-  private db: DatabaseSync;
+  private db: DatabaseSyncType;
   private closed = false;
 
   constructor(
@@ -120,18 +170,24 @@ export class SymphonyDb {
     }
     const raw = JSON.parse(row.value_json) as Partial<Settings>;
     const defaults = this.defaultSettings();
-    return {
+    return SettingsSchema.parse({
       workspaceRoot: raw.workspaceRoot ?? defaults.workspaceRoot,
-      maxConcurrentAgents: raw.maxConcurrentAgents ?? defaults.maxConcurrentAgents
-    };
+      maxConcurrentAgents: raw.maxConcurrentAgents ?? defaults.maxConcurrentAgents,
+      selfMonitor: {
+        enabled: raw.selfMonitor?.enabled ?? defaults.selfMonitor.enabled,
+        cooldownMinutes:
+          raw.selfMonitor?.cooldownMinutes ?? defaults.selfMonitor.cooldownMinutes
+      }
+    });
   }
 
   saveSettings(settings: Settings): Settings {
+    const normalized = SettingsSchema.parse(settings);
     this.db
       .prepare(
         "INSERT INTO app_settings (key, value_json) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json"
       )
-      .run(settingsKey, JSON.stringify(settings));
+      .run(settingsKey, JSON.stringify(normalized));
     return this.getSettings();
   }
 
@@ -163,6 +219,21 @@ export class SymphonyDb {
       throw new Error(`未找到仓库：${id}`);
     }
     return mapRepository(row);
+  }
+
+  findRepositoryByPath(path: string): Repository | null {
+    const row = this.db
+      .prepare("SELECT * FROM repositories WHERE path = ? ORDER BY created_at ASC LIMIT 1")
+      .get(path) as RepositoryRow | undefined;
+    return row ? mapRepository(row) : null;
+  }
+
+  ensureRepository(input: EnsureRepositoryInput): Repository {
+    const existing = this.findRepositoryByPath(input.path);
+    if (existing) {
+      return existing;
+    }
+    return this.createRepository(input);
   }
 
   updateRepository(id: string, input: UpdateRepositoryInput): Repository {
@@ -233,6 +304,11 @@ export class SymphonyDb {
       throw new Error(`未找到任务：${id}`);
     }
     return mapTask(row);
+  }
+
+  private getTaskIfExists(id: string): Task | null {
+    const row = this.db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as TaskRow | undefined;
+    return row ? mapTask(row) : null;
   }
 
   getTaskDetail(id: string): TaskDetail {
@@ -419,6 +495,60 @@ export class SymphonyDb {
     return rows.map(mapRunEvent);
   }
 
+  getSystemErrorIncident(fingerprint: string): SystemErrorIncident | null {
+    const row = this.db
+      .prepare("SELECT * FROM system_error_incidents WHERE fingerprint = ?")
+      .get(fingerprint) as SystemErrorIncidentRow | undefined;
+    return row ? mapSystemErrorIncident(row) : null;
+  }
+
+  recordSystemErrorIncident(input: CreateSystemErrorIncidentInput): SystemErrorRecordResult {
+    const now = (input.now ?? new Date()).toISOString();
+    const repository = this.ensureRepository(input.repository);
+    const current = this.getSystemErrorIncident(input.fingerprint);
+    const currentTask = current?.taskId ? this.getTaskIfExists(current.taskId) : null;
+    const shouldCreateTask =
+      !current ||
+      !currentTask ||
+      (terminalTaskStatusSet.has(currentTask.status) &&
+        isCooldownElapsed(current.lastSeen, now, input.cooldownMinutes));
+
+    const task = shouldCreateTask
+      ? this.createTask({
+          repositoryId: repository.id,
+          title: input.title,
+          description: input.description,
+          priority: 4,
+          labels: ["system-monitor", "auto-created"],
+          scopePaths: []
+        })
+      : currentTask;
+
+    if (!current) {
+      this.db
+        .prepare(
+          `INSERT INTO system_error_incidents
+            (fingerprint, task_id, source, occurrences, first_seen, last_seen, last_summary)
+           VALUES (?, ?, ?, 1, ?, ?, ?)`
+        )
+        .run(input.fingerprint, task?.id ?? null, input.source, now, now, input.summary);
+    } else {
+      this.db
+        .prepare(
+          `UPDATE system_error_incidents
+           SET task_id = ?, source = ?, occurrences = occurrences + 1, last_seen = ?, last_summary = ?
+           WHERE fingerprint = ?`
+        )
+        .run(task?.id ?? current.taskId, input.source, now, input.summary, input.fingerprint);
+    }
+
+    return {
+      incident: this.getSystemErrorIncident(input.fingerprint) ?? missingIncident(input.fingerprint),
+      task,
+      createdTask: shouldCreateTask
+    };
+  }
+
   recoverInterruptedRuns(): void {
     const rows = this.db
       .prepare("SELECT * FROM runs WHERE status IN ('queued', 'preparing', 'running')")
@@ -437,7 +567,11 @@ export class SymphonyDb {
   private defaultSettings(): Settings {
     return {
       workspaceRoot: resolve(this.projectRoot, ".workspaces"),
-      maxConcurrentAgents: 2
+      maxConcurrentAgents: 2,
+      selfMonitor: {
+        enabled: true,
+        cooldownMinutes: 30
+      }
     };
   }
 
@@ -499,6 +633,16 @@ export class SymphonyDb {
         message TEXT NOT NULL,
         payload_json TEXT,
         created_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS system_error_incidents (
+        fingerprint TEXT PRIMARY KEY,
+        task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+        source TEXT NOT NULL,
+        occurrences INTEGER NOT NULL,
+        first_seen TEXT NOT NULL,
+        last_seen TEXT NOT NULL,
+        last_summary TEXT NOT NULL
       );
     `);
     this.addColumnIfMissing("tasks", "repository_id", "TEXT");
@@ -577,4 +721,24 @@ function mapRunEvent(row: RunEventRow): RunEvent {
     payload: row.payload_json ? JSON.parse(row.payload_json) : null,
     createdAt: row.created_at
   };
+}
+
+function mapSystemErrorIncident(row: SystemErrorIncidentRow): SystemErrorIncident {
+  return {
+    fingerprint: row.fingerprint,
+    taskId: row.task_id,
+    source: row.source,
+    occurrences: row.occurrences,
+    firstSeen: row.first_seen,
+    lastSeen: row.last_seen,
+    lastSummary: row.last_summary
+  };
+}
+
+function isCooldownElapsed(lastSeen: string, now: string, cooldownMinutes: number): boolean {
+  return Date.parse(now) - Date.parse(lastSeen) >= cooldownMinutes * 60 * 1000;
+}
+
+function missingIncident(fingerprint: string): never {
+  throw new Error(`系统错误记录写入失败：${fingerprint}`);
 }

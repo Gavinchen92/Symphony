@@ -9,12 +9,13 @@
     "dev": "concurrently -n server,web -c cyan,magenta \"pnpm --filter @symphony/server dev\" \"pnpm --filter @symphony/web dev\"",
     "generate:codex-types": "codex app-server generate-ts --out apps/server/src/codex/generated --experimental",
     "test": "pnpm -r test",
+    "test:e2e": "playwright test",
     "typecheck": "pnpm -r typecheck"
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "concurrently": "^9.2.1",
     "typescript": "^5.9.3",
     "vitest": "^4.0.15"
   }
 }
-

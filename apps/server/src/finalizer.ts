@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { Repository, Run, Task } from "@symphony/shared";
 import type { AiAdvisor, CompletionDraft } from "./aiAdvisor";
 import type { SymphonyDb } from "./db";
+import type { SystemMonitor } from "./systemMonitor";
 
 const execFileAsync = promisify(execFile);
 
@@ -12,6 +13,7 @@ type FinalizerDeps = {
   db: SymphonyDb;
   advisor: AiAdvisor;
   commandRunner?: CommandRunner;
+  systemMonitor?: Pick<SystemMonitor, "report">;
 };
 
 export type CommandResult = {
@@ -158,6 +160,17 @@ export class TaskFinalizer {
       this.event(input.run.id, "自动交付完成", { commitSha, prUrl, cleanupError });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      if (shouldReportFinalizerSystemError(message)) {
+        this.deps.systemMonitor?.report({
+          source: "finalizer",
+          error,
+          context: {
+            taskId: input.task.id,
+            runId: input.run.id,
+            branchName: input.branchName
+          }
+        });
+      }
       this.deps.db.updateTaskCompletion(input.task.id, {
         completionError: message
       });
@@ -488,6 +501,21 @@ function formatCommandError(error: unknown): string {
     return stderr || stdout || record.message || String(error);
   }
   return String(error);
+}
+
+function shouldReportFinalizerSystemError(message: string): boolean {
+  const expectedTaskFailures = [
+    "校验：",
+    "暂存变更失败",
+    "创建提交失败",
+    "推送任务分支失败",
+    "创建 GitHub PR失败",
+    "工作区清理失败",
+    "没有可提交改动",
+    "没有已暂存改动",
+    "gh pr create 未返回 PR URL"
+  ];
+  return !expectedTaskFailures.some((prefix) => message.includes(prefix));
 }
 
 async function defaultCommandRunner(
