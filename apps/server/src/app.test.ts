@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { TaskWithLatestRunSchema } from "@symphony/shared";
 import type { AddressInfo } from "node:net";
 import { describe, expect, it } from "vitest";
 import { createFastifyApp } from "./app";
@@ -61,10 +62,16 @@ describe("Fastify app", () => {
         }
       });
       expect(task.statusCode).toBe(201);
-      expect(task.json()).toMatchObject({
+      const taskBody = TaskWithLatestRunSchema.parse(task.json());
+      expect(taskBody).toMatchObject({
         repositoryId: repositoryBody.id,
         title: "实现 Fastify 迁移",
-        status: "todo"
+        status: "todo",
+        repository: {
+          id: repositoryBody.id,
+          name: "Repo"
+        },
+        latestRun: null
       });
 
       const list = await fixture.app.inject({ method: "GET", url: "/api/tasks" });

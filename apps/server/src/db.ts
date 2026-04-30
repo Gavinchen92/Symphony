@@ -291,11 +291,11 @@ export class SymphonyDb {
     const rows = this.db
       .prepare("SELECT * FROM tasks ORDER BY updated_at DESC")
       .all() as TaskRow[];
-    return rows.map((row) => ({
-      ...mapTask(row),
-      repository: row.repository_id ? this.getRepository(row.repository_id) : null,
-      latestRun: this.getLatestRun(row.id)
-    }));
+    return rows.map((row) => this.toTaskWithLatestRun(mapTask(row)));
+  }
+
+  getTaskWithLatestRun(id: string): TaskWithLatestRun {
+    return this.toTaskWithLatestRun(this.getTask(id));
   }
 
   getTask(id: string): Task {
@@ -659,6 +659,14 @@ export class SymphonyDb {
     if (!rows.some((row) => row.name === column)) {
       this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
     }
+  }
+
+  private toTaskWithLatestRun(task: Task): TaskWithLatestRun {
+    return {
+      ...task,
+      repository: task.repositoryId ? this.getRepository(task.repositoryId) : null,
+      latestRun: this.getLatestRun(task.id)
+    };
   }
 }
 

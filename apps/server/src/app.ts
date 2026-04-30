@@ -208,7 +208,8 @@ function registerApiRoutes(app: FastifyInstance): void {
   app.post("/api/tasks", async (request, reply) => {
     const input = CreateTaskInputSchema.parse(request.body);
     void reply.code(201);
-    return app.symphonyDb.createTask(input);
+    const task = app.symphonyDb.createTask(input);
+    return app.symphonyDb.getTaskWithLatestRun(task.id);
   });
 
   app.get("/api/tasks/:taskId", async (request) => {
