@@ -53,6 +53,11 @@ describe("SparseWorktreeProvider", () => {
       labels: [],
       scopePaths: ["apps/web"],
       status: "todo",
+      completedAt: null,
+      completionCommitSha: null,
+      completionPrUrl: null,
+      completionError: null,
+      completionCleanupError: null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
@@ -105,6 +110,11 @@ describe("SparseWorktreeProvider", () => {
       labels: [],
       scopePaths: ["apps/web"],
       status: "todo",
+      completedAt: null,
+      completionCommitSha: null,
+      completionPrUrl: null,
+      completionError: null,
+      completionCleanupError: null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };

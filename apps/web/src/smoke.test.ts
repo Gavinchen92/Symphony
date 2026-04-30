@@ -8,9 +8,9 @@ describe("web smoke", () => {
       "queued",
       "running",
       "human_review",
+      "finalizing",
       "done",
       "failed"
     ]);
   });
 });
-

@@ -16,7 +16,8 @@ describe("task status transitions", () => {
     expect(canTransitionTask("queued", "preparing")).toBe(true);
     expect(canTransitionTask("preparing", "running")).toBe(true);
     expect(canTransitionTask("running", "human_review")).toBe(true);
-    expect(canTransitionTask("human_review", "done")).toBe(true);
+    expect(canTransitionTask("human_review", "finalizing")).toBe(true);
+    expect(canTransitionTask("finalizing", "done")).toBe(true);
   });
 
   it("rejects impossible jumps", () => {
@@ -24,6 +25,11 @@ describe("task status transitions", () => {
     expect(() => assertTaskTransition("done", "running")).toThrow(
       "invalid task status transition"
     );
+  });
+
+  it("returns failed finalization to human review", () => {
+    expect(canTransitionTask("finalizing", "human_review")).toBe(true);
+    expect(canTransitionTask("finalizing", "todo")).toBe(false);
   });
 });
 

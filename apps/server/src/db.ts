@@ -41,6 +41,11 @@ type TaskRow = {
   labels_json: string;
   scope_paths_json: string;
   status: TaskStatus;
+  completed_at: string | null;
+  completion_commit_sha: string | null;
+  completion_pr_url: string | null;
+  completion_error: string | null;
+  completion_cleanup_error: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -70,6 +75,17 @@ type RunEventRow = {
 };
 
 const settingsKey = "settings";
+
+type TaskCompletionPatch = Partial<
+  Pick<
+    Task,
+    | "completedAt"
+    | "completionCommitSha"
+    | "completionPrUrl"
+    | "completionError"
+    | "completionCleanupError"
+  >
+>;
 
 export class SymphonyDb {
   private db: DatabaseSync;
@@ -143,8 +159,10 @@ export class SymphonyDb {
   updateRepository(id: string, input: UpdateRepositoryInput): Repository {
     const current = this.getRepository(id);
     const next = {
-      ...current,
-      ...input,
+      name: input.name ?? current.name,
+      path: input.path ?? current.path,
+      baseBranch: input.baseBranch ?? current.baseBranch,
+      workspaceStrategy: input.workspaceStrategy ?? current.workspaceStrategy,
       updatedAt: new Date().toISOString()
     };
     this.db
@@ -222,13 +240,18 @@ export class SymphonyDb {
     if (input.status) {
       assertTaskTransition(current.status, input.status);
     }
-    if (input.repositoryId) {
+    if (input.repositoryId !== undefined && input.repositoryId !== null) {
       this.getRepository(input.repositoryId);
     }
 
     const next = {
-      ...current,
-      ...input,
+      repositoryId: input.repositoryId === undefined ? current.repositoryId : input.repositoryId,
+      title: input.title ?? current.title,
+      description: input.description ?? current.description,
+      priority: input.priority ?? current.priority,
+      labels: input.labels ?? current.labels,
+      scopePaths: input.scopePaths ?? current.scopePaths,
+      status: input.status ?? current.status,
       updatedAt: new Date().toISOString()
     };
 
@@ -255,6 +278,33 @@ export class SymphonyDb {
 
   updateTaskStatus(id: string, status: TaskStatus): Task {
     return this.updateTask(id, { status });
+  }
+
+  updateTaskCompletion(id: string, patch: TaskCompletionPatch): Task {
+    const current = this.getTask(id);
+    const next = {
+      ...current,
+      ...patch,
+      updatedAt: new Date().toISOString()
+    };
+
+    this.db
+      .prepare(
+        `UPDATE tasks
+         SET completed_at = ?, completion_commit_sha = ?, completion_pr_url = ?, completion_error = ?, completion_cleanup_error = ?, updated_at = ?
+         WHERE id = ?`
+      )
+      .run(
+        next.completedAt,
+        next.completionCommitSha,
+        next.completionPrUrl,
+        next.completionError,
+        next.completionCleanupError,
+        next.updatedAt,
+        id
+      );
+
+    return this.getTask(id);
   }
 
   createRun(taskId: string): Run {
@@ -409,6 +459,11 @@ export class SymphonyDb {
         labels_json TEXT NOT NULL,
         scope_paths_json TEXT NOT NULL,
         status TEXT NOT NULL,
+        completed_at TEXT,
+        completion_commit_sha TEXT,
+        completion_pr_url TEXT,
+        completion_error TEXT,
+        completion_cleanup_error TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -438,6 +493,11 @@ export class SymphonyDb {
       );
     `);
     this.addColumnIfMissing("tasks", "repository_id", "TEXT");
+    this.addColumnIfMissing("tasks", "completed_at", "TEXT");
+    this.addColumnIfMissing("tasks", "completion_commit_sha", "TEXT");
+    this.addColumnIfMissing("tasks", "completion_pr_url", "TEXT");
+    this.addColumnIfMissing("tasks", "completion_error", "TEXT");
+    this.addColumnIfMissing("tasks", "completion_cleanup_error", "TEXT");
     this.addColumnIfMissing("runs", "workspace_strategy", "TEXT");
   }
 
@@ -472,6 +532,11 @@ function mapTask(row: TaskRow): Task {
     labels: JSON.parse(row.labels_json) as string[],
     scopePaths: JSON.parse(row.scope_paths_json) as string[],
     status: row.status,
+    completedAt: row.completed_at,
+    completionCommitSha: row.completion_commit_sha,
+    completionPrUrl: row.completion_pr_url,
+    completionError: row.completion_error,
+    completionCleanupError: row.completion_cleanup_error,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };

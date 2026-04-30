@@ -105,6 +105,10 @@ export async function markTaskDone(id: string): Promise<void> {
   await request(`/api/tasks/${id}/mark-done`, { method: "POST" });
 }
 
+export async function finalizeTask(id: string): Promise<void> {
+  await request(`/api/tasks/${id}/finalize`, { method: "POST" });
+}
+
 export async function fetchSettings(): Promise<Settings> {
   return SettingsSchema.parse(await request("/api/settings"));
 }

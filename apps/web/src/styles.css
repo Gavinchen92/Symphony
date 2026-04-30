@@ -387,7 +387,8 @@ h1 {
 }
 
 .status-dot.preparing,
-.status-dot.running {
+.status-dot.running,
+.status-dot.finalizing {
   background: rgba(159, 232, 112, 0.26);
 }
 
@@ -511,7 +512,8 @@ h1 {
 .task-status-chip.todo,
 .task-status-chip.queued,
 .task-status-chip.preparing,
-.task-status-chip.running {
+.task-status-chip.running,
+.task-status-chip.finalizing {
   background: var(--mint-soft);
   border-color: rgba(78, 156, 34, 0.32);
   color: var(--dark-green);
@@ -718,6 +720,74 @@ textarea {
   font-size: 13px;
   font-weight: 700;
   line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.completion-box {
+  background: rgba(255, 253, 247, 0.72);
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  display: grid;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 13px;
+}
+
+.completion-box.finalizing {
+  background: rgba(159, 232, 112, 0.13);
+  border-color: rgba(78, 156, 34, 0.22);
+}
+
+.completion-box.done {
+  background: rgba(5, 77, 40, 0.08);
+  border-color: rgba(5, 77, 40, 0.16);
+}
+
+.completion-box.human_review:has(strong) {
+  background: rgba(208, 50, 56, 0.06);
+  border-color: rgba(208, 50, 56, 0.18);
+}
+
+.completion-box p {
+  color: var(--dark-green);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.completion-box span,
+.completion-box small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
+.completion-box code {
+  background: rgba(14, 15, 12, 0.08);
+  border-radius: 10px;
+  color: var(--ink);
+  font-family: "SF Mono", Menlo, monospace;
+  font-size: 12px;
+  font-weight: 900;
+  padding: 7px 9px;
+  width: fit-content;
+}
+
+.completion-box a {
+  align-items: center;
+  color: var(--dark-green);
+  display: inline-flex;
+  font-size: 13px;
+  font-weight: 900;
+  gap: 6px;
+  text-decoration: none;
+  width: fit-content;
+}
+
+.completion-box strong {
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.45;
   overflow-wrap: anywhere;
 }
 

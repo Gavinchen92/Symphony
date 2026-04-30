@@ -6,12 +6,13 @@ export const taskStatuses = [
   "preparing",
   "running",
   "human_review",
+  "finalizing",
   "done",
   "failed",
   "cancelled"
 ] as const;
 
-export const activeTaskStatuses = ["queued", "preparing", "running"] as const;
+export const activeTaskStatuses = ["queued", "preparing", "running", "finalizing"] as const;
 
 export const terminalTaskStatuses = ["done", "failed", "cancelled"] as const;
 
@@ -97,6 +98,11 @@ export const TaskSchema = z.object({
   labels: z.array(z.string()),
   scopePaths: z.array(z.string()),
   status: TaskStatusSchema,
+  completedAt: z.string().nullable(),
+  completionCommitSha: z.string().nullable(),
+  completionPrUrl: z.string().nullable(),
+  completionError: z.string().nullable(),
+  completionCleanupError: z.string().nullable(),
   createdAt: z.string(),
   updatedAt: z.string()
 });
@@ -179,7 +185,8 @@ const transitions: Record<TaskStatus, readonly TaskStatus[]> = {
   queued: ["preparing", "cancelled", "todo", "failed"],
   preparing: ["running", "failed", "cancelled"],
   running: ["human_review", "failed", "cancelled"],
-  human_review: ["done", "queued", "failed", "cancelled"],
+  human_review: ["finalizing", "done", "queued", "failed", "cancelled"],
+  finalizing: ["done", "human_review", "failed", "cancelled"],
   done: ["queued"],
   failed: ["queued", "todo"],
   cancelled: ["queued", "todo"]

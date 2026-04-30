@@ -1,5 +1,6 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { createServer } from "node:net";
+import type { Readable } from "node:stream";
 import WebSocket from "ws";
 
 export type AppServerNotification = {
@@ -19,7 +20,7 @@ type PendingRequest = {
 };
 
 export class CodexAppServerClient {
-  private child: ChildProcessWithoutNullStreams | null = null;
+  private child: ChildProcessByStdio<null, Readable, Readable> | null = null;
   private ws: WebSocket | null = null;
   private pending = new Map<string, PendingRequest>();
   private requestId = 0;
@@ -28,19 +29,20 @@ export class CodexAppServerClient {
   async start(): Promise<void> {
     const port = await getFreePort();
     const endpoint = `ws://127.0.0.1:${port}`;
-    this.child = spawn("codex", ["app-server", "--listen", endpoint], {
+    const child = spawn("codex", ["app-server", "--listen", endpoint], {
       stdio: ["ignore", "pipe", "pipe"]
     });
+    this.child = child;
 
-    this.child.stderr.on("data", (chunk) => {
+    child.stderr.on("data", (chunk) => {
       this.emit({ method: "stderr", params: chunk.toString("utf8") });
     });
 
-    this.child.stdout.on("data", (chunk) => {
+    child.stdout.on("data", (chunk) => {
       this.emit({ method: "stdout", params: chunk.toString("utf8") });
     });
 
-    this.child.on("exit", (code, signal) => {
+    child.on("exit", (code, signal) => {
       const error = new Error(`Codex app-server 已退出：code=${code ?? "null"} signal=${signal ?? "null"}`);
       for (const pending of this.pending.values()) {
         pending.reject(error);

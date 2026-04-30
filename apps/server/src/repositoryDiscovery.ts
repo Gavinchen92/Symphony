@@ -94,12 +94,13 @@ export function scorePath(path: string, query: string): { score: number; matches
     return null;
   }
 
-  return matchCandidates
+  const bestMatch = matchCandidates
     .map((matches) => ({
       matches,
       score: calculateMatchScore(path, matches, basenameStart)
     }))
     .sort((left, right) => right.score - left.score)[0];
+  return bestMatch ?? null;
 }
 
 function findSequentialMatches(path: string, query: string, startIndex: number): number[] | null {

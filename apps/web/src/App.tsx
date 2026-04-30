@@ -1,17 +1,18 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import {
   AlertTriangle,
-  Check,
   CheckCircle2,
   ChevronDown,
   CircleStop,
   CircleX,
   Clock3,
+  ExternalLink,
   File,
   Folder,
   FolderGit2,
   FolderOpen,
   GitBranch,
+  GitPullRequest,
   Inbox,
   LoaderCircle,
   Play,
@@ -48,7 +49,7 @@ import {
   fetchSettings,
   fetchTaskDetail,
   fetchTasks,
-  markTaskDone,
+  finalizeTask,
   saveSettings,
   selectRepositoryDirectory,
   updateRepository,
@@ -65,6 +66,7 @@ const taskStatusLabels: Record<TaskStatus, string> = {
   preparing: "准备中",
   running: "运行中",
   human_review: "待人工确认",
+  finalizing: "交付中",
   done: "已完成",
   failed: "失败",
   cancelled: "已取消"
@@ -143,6 +145,7 @@ const statusFilters: Array<{ value: StatusFilter; label: string }> = [
   { value: "preparing", label: "准备中" },
   { value: "running", label: "运行中" },
   { value: "human_review", label: "待人工确认" },
+  { value: "finalizing", label: "交付中" },
   { value: "done", label: "已完成" },
   { value: "failed", label: "失败" }
 ];
@@ -165,6 +168,12 @@ const taskGroups: Array<{ id: string; title: string; hint: string; statuses: Tas
     title: "等待人工审核",
     hint: "Codex 已完成，等待你确认关闭",
     statuses: ["human_review"]
+  },
+  {
+    id: "finalizing",
+    title: "正在交付",
+    hint: "校验、提交、推送和 PR 创建正在执行",
+    statuses: ["finalizing"]
   },
   {
     id: "finished",
@@ -701,14 +710,32 @@ export function App() {
                   <p>{selectedTask.key}</p>
                 </div>
                 <div className="detail-actions">
-                  <button aria-label="派发任务" data-tooltip="派发任务" type="button" onClick={() => void runAction(() => dispatchTask(selectedTask.id))}>
+                  <button
+                    aria-label="派发任务"
+                    data-tooltip="派发任务"
+                    type="button"
+                    disabled={selectedTask.status === "finalizing"}
+                    onClick={() => void runAction(() => dispatchTask(selectedTask.id))}
+                  >
                     <Play size={16} />
                   </button>
-                  <button aria-label="取消任务" data-tooltip="取消任务" type="button" onClick={() => void runAction(() => cancelTask(selectedTask.id))}>
+                  <button
+                    aria-label="取消任务"
+                    data-tooltip="取消任务"
+                    type="button"
+                    disabled={selectedTask.status === "finalizing"}
+                    onClick={() => void runAction(() => cancelTask(selectedTask.id))}
+                  >
                     <CircleX size={16} />
                   </button>
-                  <button aria-label="确认完成" data-tooltip="确认完成" type="button" onClick={() => void runAction(() => markTaskDone(selectedTask.id))}>
-                    <Check size={16} />
+                  <button
+                    aria-label="提交推送并创建 PR"
+                    data-tooltip="提交推送并创建 PR"
+                    type="button"
+                    disabled={selectedTask.status !== "human_review"}
+                    onClick={() => void runAction(() => finalizeTask(selectedTask.id))}
+                  >
+                    <GitPullRequest size={16} />
                   </button>
                 </div>
               </div>
@@ -742,6 +769,28 @@ export function App() {
               <section className="summary-box">
                 <p>最终摘要</p>
                 <span>{detail.runs[0]?.summary ?? detail.runs[0]?.error ?? "暂无摘要"}</span>
+              </section>
+
+              <section className={`completion-box ${selectedTask.status}`}>
+                <div>
+                  <p>交付收尾</p>
+                  <span>{completionStatusText(selectedTask)}</span>
+                </div>
+                {selectedTask.completionCommitSha ? (
+                  <code>{selectedTask.completionCommitSha.slice(0, 12)}</code>
+                ) : null}
+                {selectedTask.completionPrUrl ? (
+                  <a href={selectedTask.completionPrUrl} target="_blank" rel="noreferrer">
+                    <ExternalLink size={14} />
+                    查看 PR
+                  </a>
+                ) : null}
+                {selectedTask.completionError ? (
+                  <strong>{selectedTask.completionError}</strong>
+                ) : null}
+                {selectedTask.completionCleanupError ? (
+                  <small>工作区清理失败：{selectedTask.completionCleanupError}</small>
+                ) : null}
               </section>
 
               <div className="panel-title logs-title">
@@ -989,6 +1038,7 @@ function StatusIcon({ status, size = 16 }: { status: StatusFilter; size?: number
       return <Clock3 size={size} />;
     case "preparing":
     case "running":
+    case "finalizing":
       return <LoaderCircle size={size} />;
     case "human_review":
       return <AlertTriangle size={size} />;
@@ -1002,6 +1052,21 @@ function StatusIcon({ status, size = 16 }: { status: StatusFilter; size?: number
       return exhaustive;
     }
   }
+}
+
+function completionStatusText(task: TaskWithLatestRun): string {
+  if (task.status === "finalizing") {
+    return "正在运行校验、提交、推送和 PR 创建。";
+  }
+  if (task.status === "human_review") {
+    return task.completionError
+      ? "上次交付失败，修复后可重新提交。"
+      : "等待人工确认后自动提交、推送并创建 Ready PR。";
+  }
+  if (task.status === "done") {
+    return "已完成自动交付。";
+  }
+  return "仅待人工确认的任务会触发自动交付。";
 }
 
 function countTasksByStatus(tasks: TaskWithLatestRun[], status: StatusFilter): number {

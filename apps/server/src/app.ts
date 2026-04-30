@@ -11,12 +11,14 @@ import {
 } from "@symphony/shared";
 import type { SymphonyDb } from "./db";
 import type { EventBus } from "./events";
+import type { TaskFinalizer } from "./finalizer";
 import type { Orchestrator } from "./orchestrator";
 import { listRepositoryPathSuggestions, selectRepositoryDirectory } from "./repositoryDiscovery";
 
 type AppDeps = {
   db: SymphonyDb;
   orchestrator: Orchestrator;
+  finalizer: TaskFinalizer;
   eventBus: EventBus;
   webDistDir: string;
 };
@@ -55,7 +57,7 @@ async function handleApi(
   req: IncomingMessage,
   res: ServerResponse,
   url: URL,
-  { db, orchestrator, eventBus }: AppDeps
+  { db, orchestrator, finalizer, eventBus }: AppDeps
 ) {
   const parts = url.pathname.split("/").filter(Boolean);
 
@@ -151,12 +153,22 @@ async function handleApi(
     }
 
     if (req.method === "POST" && parts[3] === "mark-done") {
-      sendJson(res, 200, db.updateTaskStatus(taskId, "done"));
+      sendJson(res, 202, finalizer.finalize(taskId));
+      return;
+    }
+
+    if (req.method === "POST" && parts[3] === "finalize") {
+      sendJson(res, 202, finalizer.finalize(taskId));
       return;
     }
 
     if (req.method === "POST" && parts[3] === "status") {
-      const input = TaskStatusSchema.parse((await readJson(req))?.status);
+      const rawInput = await readJson(req);
+      const status =
+        rawInput && typeof rawInput === "object"
+          ? (rawInput as { status?: unknown }).status
+          : undefined;
+      const input = TaskStatusSchema.parse(status);
       sendJson(res, 200, db.updateTaskStatus(taskId, input));
       return;
     }

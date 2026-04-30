@@ -2,9 +2,9 @@ node_modules/
 dist/
 data/
 .workspaces/
+.env.local
 .turbo/
 .vite/
 coverage/
 *.log
 .DS_Store
-
