@@ -33,10 +33,22 @@ const blockedContextKeys = new Set([
 
 export class SystemMonitor {
   private readonly projectRoot: string;
+  private readonly repository: {
+    name: string;
+    path: string;
+    baseBranch: string;
+    workspaceStrategy: "full";
+  };
   private readonly processListeners: Array<() => void> = [];
 
   constructor(private readonly deps: SystemMonitorDeps) {
     this.projectRoot = resolve(deps.projectRoot);
+    this.repository = {
+      name: "Symphony",
+      path: this.projectRoot,
+      baseBranch: currentGitBranch(this.projectRoot) ?? "main",
+      workspaceStrategy: "full"
+    };
   }
 
   report(input: ReportSystemErrorInput): SystemErrorRecordResult | null {
@@ -62,12 +74,7 @@ export class SystemMonitor {
           context: safeContext
         }),
         summary,
-        repository: {
-          name: "Symphony",
-          path: this.projectRoot,
-          baseBranch: currentGitBranch(this.projectRoot) ?? "main",
-          workspaceStrategy: "full"
-        },
+        repository: this.repository,
         cooldownMinutes: settings.selfMonitor.cooldownMinutes,
         ...(input.now ? { now: input.now } : {})
       });
