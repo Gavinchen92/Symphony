@@ -1,6 +1,14 @@
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { readFile } from "node:fs/promises";
-import { extname, join } from "node:path";
+import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import cors from "@fastify/cors";
+import fastifyStatic from "@fastify/static";
+import fastify, {
+  type FastifyBaseLogger,
+  type FastifyInstance,
+  type FastifyReply,
+  type FastifyRequest
+} from "fastify";
 import {
   CreateRepositoryInputSchema,
   CreateTaskInputSchema,
@@ -9,6 +17,7 @@ import {
   UpdateRepositoryInputSchema,
   UpdateTaskInputSchema
 } from "@symphony/shared";
+import { ZodError, z } from "zod";
 import type { SymphonyDb } from "./db";
 import type { EventBus } from "./events";
 import type { TaskFinalizer } from "./finalizer";
@@ -17,256 +26,267 @@ import { listRepositoryPathSuggestions, selectRepositoryDirectory } from "./repo
 
 type AppDeps = {
   db: SymphonyDb;
-  orchestrator: Orchestrator;
-  finalizer: TaskFinalizer;
+  orchestrator: Pick<Orchestrator, "dispatch" | "cancelTask">;
+  finalizer: Pick<TaskFinalizer, "finalize">;
   eventBus: EventBus;
   webDistDir: string;
+  logger: FastifyBaseLogger;
+  closeLogger?: () => void;
 };
 
-const jsonHeaders = {
-  "content-type": "application/json; charset=utf-8",
-  "access-control-allow-origin": "http://127.0.0.1:5173",
-  "access-control-allow-methods": "GET,POST,PATCH,PUT,DELETE,OPTIONS",
+declare module "fastify" {
+  interface FastifyInstance {
+    symphonyDb: SymphonyDb;
+    symphonyOrchestrator: Pick<Orchestrator, "dispatch" | "cancelTask">;
+    symphonyFinalizer: Pick<TaskFinalizer, "finalize">;
+    symphonyEventBus: EventBus;
+  }
+}
+
+const corsOrigin = "http://127.0.0.1:5173";
+const corsMethods = ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"] as const;
+const corsHeaders = {
+  "access-control-allow-origin": corsOrigin,
+  "access-control-allow-methods": corsMethods.join(","),
   "access-control-allow-headers": "content-type"
 };
 
-export function createHttpApp(deps: AppDeps) {
-  return createServer(async (req, res) => {
-    try {
-      if (req.method === "OPTIONS") {
-        res.writeHead(204, jsonHeaders).end();
-        return;
-      }
+const RepositoryParamsSchema = z.object({ repositoryId: z.string().min(1) });
+const TaskParamsSchema = z.object({ taskId: z.string().min(1) });
+const RunParamsSchema = z.object({ runId: z.string().min(1) });
+const PathSuggestionsQuerySchema = z.object({ q: z.string().optional() });
+const TaskStatusBodySchema = z.object({ status: TaskStatusSchema });
 
-      const url = new URL(req.url ?? "/", "http://127.0.0.1");
-      if (url.pathname.startsWith("/api/")) {
-        await handleApi(req, res, url, deps);
-        return;
-      }
+export async function createFastifyApp(deps: AppDeps): Promise<FastifyInstance> {
+  const app = fastify({
+    loggerInstance: deps.logger,
+    disableRequestLogging: true,
+    requestIdHeader: false,
+    genReqId: () => randomUUID()
+  });
 
-      await serveStatic(res, deps.webDistDir, url.pathname);
-    } catch (error) {
-      sendJson(res, 500, {
-        error: error instanceof Error ? error.message : "服务内部错误"
-      });
+  app.decorate("symphonyDb", deps.db);
+  app.decorate("symphonyOrchestrator", deps.orchestrator);
+  app.decorate("symphonyFinalizer", deps.finalizer);
+  app.decorate("symphonyEventBus", deps.eventBus);
+
+  app.addHook("onClose", () => {
+    deps.db.close();
+    deps.closeLogger?.();
+  });
+
+  app.addHook("onRequest", (request, _reply, done) => {
+    request.log.info(
+      { requestId: request.id, method: request.method, url: request.url },
+      "request_started"
+    );
+    done();
+  });
+
+  app.addHook("onResponse", (request, reply, done) => {
+    request.log.info(
+      {
+        requestId: request.id,
+        method: request.method,
+        url: request.url,
+        statusCode: reply.statusCode,
+        responseTime: reply.elapsedTime
+      },
+      "request_completed"
+    );
+    done();
+  });
+
+  await app.register(cors, {
+    origin: corsOrigin,
+    methods: [...corsMethods],
+    allowedHeaders: ["content-type"]
+  });
+
+  registerApiRoutes(app);
+  await registerStaticRoutes(app, deps.webDistDir);
+
+  app.setErrorHandler((error, request, reply) => {
+    if (error instanceof ZodError) {
+      request.log.warn({ err: error, requestId: request.id }, "request_validation_failed");
+      void reply.code(400).send({ error: "请求参数不合法" });
+      return;
     }
+
+    const statusCode = statusCodeOf(error);
+    if (statusCode === 400) {
+      request.log.warn({ err: error, requestId: request.id }, "request_parse_failed");
+      void reply.code(400).send({ error: "请求参数不合法" });
+      return;
+    }
+
+    request.log.error({ err: error, requestId: request.id }, "request_failed");
+    void reply.code(500).send({ error: "服务内部错误" });
+  });
+
+  app.setNotFoundHandler((request, reply) => {
+    if (request.url.startsWith("/api/")) {
+      void reply.code(404).send({ error: "未找到资源" });
+      return;
+    }
+
+    sendSpaFallback(reply, deps.webDistDir);
+  });
+
+  return app;
+}
+
+function statusCodeOf(error: unknown): number | null {
+  if (!error || typeof error !== "object" || !("statusCode" in error)) {
+    return null;
+  }
+  const statusCode = (error as { statusCode?: unknown }).statusCode;
+  return typeof statusCode === "number" ? statusCode : null;
+}
+
+function registerApiRoutes(app: FastifyInstance): void {
+  app.get("/api/health", async () => ({ ok: true }));
+
+  app.post("/api/system/select-repository-directory", async () => selectRepositoryDirectory());
+
+  app.get("/api/settings", async () => app.symphonyDb.getSettings());
+
+  app.put("/api/settings", async (request) => {
+    const input = SettingsSchema.parse(request.body);
+    return app.symphonyDb.saveSettings(input);
+  });
+
+  app.get("/api/repositories", async () => app.symphonyDb.listRepositories());
+
+  app.post("/api/repositories", async (request, reply) => {
+    const input = CreateRepositoryInputSchema.parse(request.body);
+    void reply.code(201);
+    return app.symphonyDb.createRepository(input);
+  });
+
+  app.patch("/api/repositories/:repositoryId", async (request) => {
+    const { repositoryId } = RepositoryParamsSchema.parse(request.params);
+    const input = UpdateRepositoryInputSchema.parse(request.body);
+    return app.symphonyDb.updateRepository(repositoryId, input);
+  });
+
+  app.delete("/api/repositories/:repositoryId", async (request) => {
+    const { repositoryId } = RepositoryParamsSchema.parse(request.params);
+    app.symphonyDb.deleteRepository(repositoryId);
+    return { ok: true };
+  });
+
+  app.get("/api/repositories/:repositoryId/path-suggestions", async (request) => {
+    const { repositoryId } = RepositoryParamsSchema.parse(request.params);
+    const { q } = PathSuggestionsQuerySchema.parse(request.query);
+    const repository = app.symphonyDb.getRepository(repositoryId);
+    return listRepositoryPathSuggestions(repository.path, q ?? "");
+  });
+
+  app.get("/api/tasks", async () => app.symphonyDb.listTasksWithLatestRun());
+
+  app.post("/api/tasks", async (request, reply) => {
+    const input = CreateTaskInputSchema.parse(request.body);
+    void reply.code(201);
+    return app.symphonyDb.createTask(input);
+  });
+
+  app.get("/api/tasks/:taskId", async (request) => {
+    const { taskId } = TaskParamsSchema.parse(request.params);
+    return app.symphonyDb.getTaskDetail(taskId);
+  });
+
+  app.patch("/api/tasks/:taskId", async (request) => {
+    const { taskId } = TaskParamsSchema.parse(request.params);
+    const input = UpdateTaskInputSchema.parse(request.body);
+    return app.symphonyDb.updateTask(taskId, input);
+  });
+
+  app.post("/api/tasks/:taskId/dispatch", async (request, reply) => {
+    const { taskId } = TaskParamsSchema.parse(request.params);
+    void reply.code(202);
+    return app.symphonyOrchestrator.dispatch(taskId);
+  });
+
+  app.post("/api/tasks/:taskId/cancel", async (request) => {
+    const { taskId } = TaskParamsSchema.parse(request.params);
+    return app.symphonyOrchestrator.cancelTask(taskId);
+  });
+
+  app.post("/api/tasks/:taskId/mark-done", async (request, reply) => {
+    const { taskId } = TaskParamsSchema.parse(request.params);
+    void reply.code(202);
+    return app.symphonyFinalizer.finalize(taskId);
+  });
+
+  app.post("/api/tasks/:taskId/finalize", async (request, reply) => {
+    const { taskId } = TaskParamsSchema.parse(request.params);
+    void reply.code(202);
+    return app.symphonyFinalizer.finalize(taskId);
+  });
+
+  app.post("/api/tasks/:taskId/status", async (request) => {
+    const { taskId } = TaskParamsSchema.parse(request.params);
+    const { status } = TaskStatusBodySchema.parse(request.body);
+    return app.symphonyDb.updateTaskStatus(taskId, status);
+  });
+
+  app.get("/api/runs/:runId/events", async (request) => {
+    const { runId } = RunParamsSchema.parse(request.params);
+    return app.symphonyDb.listRunEvents(runId);
+  });
+
+  app.get("/api/runs/:runId/events/stream", (request, reply) => {
+    const { runId } = RunParamsSchema.parse(request.params);
+    streamRunEvents(request, reply, runId, app.symphonyDb, app.symphonyEventBus);
   });
 }
 
-async function handleApi(
-  req: IncomingMessage,
-  res: ServerResponse,
-  url: URL,
-  { db, orchestrator, finalizer, eventBus }: AppDeps
-) {
-  const parts = url.pathname.split("/").filter(Boolean);
-
-  if (req.method === "GET" && url.pathname === "/api/health") {
-    sendJson(res, 200, { ok: true });
+async function registerStaticRoutes(app: FastifyInstance, webDistDir: string): Promise<void> {
+  if (!existsSync(webDistDir)) {
     return;
   }
 
-  if (req.method === "POST" && url.pathname === "/api/system/select-repository-directory") {
-    sendJson(res, 200, await selectRepositoryDirectory());
-    return;
-  }
-
-  if (req.method === "GET" && url.pathname === "/api/settings") {
-    sendJson(res, 200, db.getSettings());
-    return;
-  }
-
-  if (req.method === "PUT" && url.pathname === "/api/settings") {
-    const input = SettingsSchema.parse(await readJson(req));
-    sendJson(res, 200, db.saveSettings(input));
-    return;
-  }
-
-  if (req.method === "GET" && url.pathname === "/api/repositories") {
-    sendJson(res, 200, db.listRepositories());
-    return;
-  }
-
-  if (req.method === "POST" && url.pathname === "/api/repositories") {
-    const input = CreateRepositoryInputSchema.parse(await readJson(req));
-    sendJson(res, 201, db.createRepository(input));
-    return;
-  }
-
-  if (parts[1] === "repositories" && parts[2]) {
-    const repositoryId = parts[2];
-
-    if (req.method === "PATCH" && parts.length === 3) {
-      const input = UpdateRepositoryInputSchema.parse(await readJson(req));
-      sendJson(res, 200, db.updateRepository(repositoryId, input));
-      return;
-    }
-
-    if (req.method === "DELETE" && parts.length === 3) {
-      db.deleteRepository(repositoryId);
-      sendJson(res, 200, { ok: true });
-      return;
-    }
-
-    if (req.method === "GET" && parts[3] === "path-suggestions") {
-      const repository = db.getRepository(repositoryId);
-      const query = url.searchParams.get("q") ?? "";
-      sendJson(res, 200, await listRepositoryPathSuggestions(repository.path, query));
-      return;
-    }
-  }
-
-  if (req.method === "GET" && url.pathname === "/api/tasks") {
-    sendJson(res, 200, db.listTasksWithLatestRun());
-    return;
-  }
-
-  if (req.method === "POST" && url.pathname === "/api/tasks") {
-    const input = CreateTaskInputSchema.parse(await readJson(req));
-    sendJson(res, 201, db.createTask(input));
-    return;
-  }
-
-  if (parts[1] === "tasks" && parts[2]) {
-    const taskId = parts[2];
-
-    if (req.method === "GET" && parts.length === 3) {
-      sendJson(res, 200, db.getTaskDetail(taskId));
-      return;
-    }
-
-    if (req.method === "PATCH" && parts.length === 3) {
-      const input = UpdateTaskInputSchema.parse(await readJson(req));
-      sendJson(res, 200, db.updateTask(taskId, input));
-      return;
-    }
-
-    if (req.method === "POST" && parts[3] === "dispatch") {
-      const run = orchestrator.dispatch(taskId);
-      sendJson(res, 202, run);
-      return;
-    }
-
-    if (req.method === "POST" && parts[3] === "cancel") {
-      sendJson(res, 200, orchestrator.cancelTask(taskId));
-      return;
-    }
-
-    if (req.method === "POST" && parts[3] === "mark-done") {
-      sendJson(res, 202, finalizer.finalize(taskId));
-      return;
-    }
-
-    if (req.method === "POST" && parts[3] === "finalize") {
-      sendJson(res, 202, finalizer.finalize(taskId));
-      return;
-    }
-
-    if (req.method === "POST" && parts[3] === "status") {
-      const rawInput = await readJson(req);
-      const status =
-        rawInput && typeof rawInput === "object"
-          ? (rawInput as { status?: unknown }).status
-          : undefined;
-      const input = TaskStatusSchema.parse(status);
-      sendJson(res, 200, db.updateTaskStatus(taskId, input));
-      return;
-    }
-  }
-
-  if (parts[1] === "runs" && parts[2] && parts[3] === "events") {
-    const runId = parts[2];
-
-    if (req.method === "GET" && parts.length === 4) {
-      sendJson(res, 200, db.listRunEvents(runId));
-      return;
-    }
-
-    if (req.method === "GET" && parts[4] === "stream") {
-      streamRunEvents(res, runId, db, eventBus);
-      return;
-    }
-  }
-
-  sendJson(res, 404, { error: "未找到资源" });
-}
-
-async function readJson(req: IncomingMessage): Promise<unknown> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of req) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-  if (chunks.length === 0) {
-    return {};
-  }
-  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
-}
-
-function sendJson(res: ServerResponse, status: number, payload: unknown): void {
-  res.writeHead(status, jsonHeaders);
-  res.end(JSON.stringify(payload));
+  await app.register(fastifyStatic, {
+    root: webDistDir,
+    wildcard: true
+  });
 }
 
 function streamRunEvents(
-  res: ServerResponse,
+  request: FastifyRequest,
+  reply: FastifyReply,
   runId: string,
   db: SymphonyDb,
   eventBus: EventBus
 ): void {
-  res.writeHead(200, {
-    ...jsonHeaders,
+  reply.hijack();
+  const response = reply.raw;
+  response.writeHead(200, {
+    ...corsHeaders,
     "content-type": "text/event-stream; charset=utf-8",
     "cache-control": "no-cache",
     connection: "keep-alive"
   });
 
   for (const event of db.listRunEvents(runId)) {
-    res.write(`data: ${JSON.stringify(event)}\n\n`);
+    response.write(`data: ${JSON.stringify(event)}\n\n`);
   }
 
   const unsubscribe = eventBus.onRunEvent((event) => {
     if (event.runId === runId) {
-      res.write(`data: ${JSON.stringify(event)}\n\n`);
+      response.write(`data: ${JSON.stringify(event)}\n\n`);
     }
   });
 
-  res.on("close", unsubscribe);
+  request.raw.on("close", unsubscribe);
 }
 
-async function serveStatic(
-  res: ServerResponse,
-  webDistDir: string,
-  pathname: string
-): Promise<void> {
-  const safePath = pathname === "/" ? "/index.html" : pathname;
-  const filePath = join(webDistDir, safePath.replace(/^\/+/, ""));
-  try {
-    const content = await readFile(filePath);
-    res.writeHead(200, { "content-type": mimeType(filePath) });
-    res.end(content);
-  } catch {
-    try {
-      const content = await readFile(join(webDistDir, "index.html"));
-      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-      res.end(content);
-    } catch {
-      res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
-      res.end("未找到前端构建产物");
-    }
+function sendSpaFallback(reply: FastifyReply, webDistDir: string): void {
+  if (!existsSync(join(webDistDir, "index.html"))) {
+    void reply.code(404).type("text/plain; charset=utf-8").send("未找到前端构建产物");
+    return;
   }
-}
 
-function mimeType(filePath: string): string {
-  switch (extname(filePath)) {
-    case ".js":
-      return "text/javascript; charset=utf-8";
-    case ".css":
-      return "text/css; charset=utf-8";
-    case ".html":
-      return "text/html; charset=utf-8";
-    case ".svg":
-      return "image/svg+xml";
-    default:
-      return "application/octet-stream";
-  }
+  void reply.type("text/html; charset=utf-8").sendFile("index.html");
 }

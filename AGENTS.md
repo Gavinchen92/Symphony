@@ -1,7 +1,10 @@
 # AGENTS.md
 
+## 项目规则
 - UI的变更需要通过e2e测试进行验收
 - UI界面使用中文
+- `README.md` 是项目入口，`docs/architecture.md` 是架构真值源，`AGENTS.md` 只记录 agent 执行规则。
+- 当代码变更影响系统架构、模块职责、API 契约、配置项、日志/可观测性、任务状态流、AI Advisor/Git Finalizer 边界或数据持久化结构时，必须在同一变更中同步更新 `README.md` 或 `docs/architecture.md`；若判断无需更新，需在总结中说明原因。
 
 ## 任务边界设计
 

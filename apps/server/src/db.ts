@@ -89,6 +89,7 @@ type TaskCompletionPatch = Partial<
 
 export class SymphonyDb {
   private db: DatabaseSync;
+  private closed = false;
 
   constructor(
     dbPath: string,
@@ -100,6 +101,14 @@ export class SymphonyDb {
     this.db.exec("PRAGMA journal_mode = WAL;");
     this.db.exec("PRAGMA foreign_keys = ON;");
     this.migrate();
+  }
+
+  close(): void {
+    if (this.closed) {
+      return;
+    }
+    this.closed = true;
+    this.db.close();
   }
 
   getSettings(): Settings {
